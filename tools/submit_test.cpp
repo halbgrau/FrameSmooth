@@ -252,6 +252,40 @@ static void Phase(const char* name, double seconds, const vr::Texture_t& tex) {
 
 int main(int argc, char** argv) {
     std::string mode = argc > 1 ? argv[1] : "d3d11";
+    if (mode == "overlay") {  // background client: prints the state of the FrameSmooth dashboard overlay
+        vr::EVRInitError be = vr::VRInitError_None;
+        vr::VR_Init(&be, vr::VRApplication_Background);
+        if (be != vr::VRInitError_None) { printf("VR_Init failed: %d\n", int(be)); return 1; }
+        auto* ov = vr::VROverlay();
+        vr::VROverlayHandle_t h = vr::k_ulOverlayHandleInvalid, th = vr::k_ulOverlayHandleInvalid;
+        printf("find main: err=%d handle=%llx\n", int(ov->FindOverlay("framesmooth.dashboard", &h)), (unsigned long long)h);
+        printf("find thumb: err=%d handle=%llx\n", int(ov->FindOverlay("framesmooth.dashboard.thumb", &th)), (unsigned long long)th);
+        if (h != vr::k_ulOverlayHandleInvalid) {
+            float wm = 0, a = 0;
+            uint32_t tw = 0, tht = 0;
+            ov->GetOverlayWidthInMeters(h, &wm);
+            ov->GetOverlayAlpha(h, &a);
+            printf("visible=%d activeDashboard=%d width=%.2fm alpha=%.2f flags=0x%x\n", int(ov->IsOverlayVisible(h)),
+                   int(ov->IsActiveDashboardOverlay(h)), wm, a, 0);
+            vr::EVROverlayError te = ov->GetOverlayTextureSize(h, &tw, &tht);
+            printf("texture size err=%d %ux%u\n", int(te), tw, tht);
+            uint32_t iw = 0, ih = 0;
+            std::vector<uint8_t> img(1024 * 1024 * 4);
+            vr::EVROverlayError ie = ov->GetOverlayImageData(h, img.data(), uint32_t(img.size()), &iw, &ih);
+            printf("image data err=%d %ux%u\n", int(ie), iw, ih);
+            if (ie == vr::VROverlayError_None && iw && ih) {
+                uint64_t sum = 0, alphaSum = 0;
+                for (uint32_t i = 0; i < iw * ih; i++) { sum += img[i * 4] + img[i * 4 + 1] + img[i * 4 + 2]; alphaSum += img[i * 4 + 3]; }
+                printf("avg rgb=%.1f avg alpha=%.1f\n", double(sum) / (iw * ih * 3), double(alphaSum) / (iw * ih));
+                if (argc > 2) {  // write raw RGBA for inspection
+                    FILE* f = fopen(argv[2], "wb");
+                    if (f) { fwrite(&iw, 4, 1, f); fwrite(&ih, 4, 1, f); fwrite(img.data(), 1, size_t(iw) * ih * 4, f); fclose(f); }
+                }
+            }
+        }
+        vr::VR_Shutdown();
+        return 0;
+    }
     if (mode == "proj") {  // background client: prints the projection conventions of the connected headset
         vr::EVRInitError be = vr::VRInitError_None;
         vr::VR_Init(&be, vr::VRApplication_Background);

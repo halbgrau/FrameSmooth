@@ -533,7 +533,11 @@ struct OverlayUploader {
             ctx->UpdateSubresource(tex, 0, nullptr, rgba, UINT(w) * 4, 0);
             ctx->Flush();
             vr::Texture_t t{tex, vr::TextureType_DirectX, vr::ColorSpace_Gamma};
-            if (vr::VROverlay()->SetOverlayTexture(overlay, &t) == vr::VROverlayError_None) return;
+            vr::EVROverlayError e = vr::VROverlay()->SetOverlayTexture(overlay, &t);
+            // SteamVR's client copies the texture using OUR device context; submit that copy right away,
+            // otherwise it only runs at our next update (never, while the panel content does not change).
+            ctx->Flush();
+            if (e == vr::VROverlayError_None) return;
         }
         vr::VROverlay()->SetOverlayRaw(overlay, (void*)rgba, uint32_t(w), uint32_t(h), 4);  // fallback
     }
