@@ -1,0 +1,17 @@
+# build output
+/build/
+/out/
+/dist/
+/release/
+
+# IDE / OS
+.vs/
+.vscode/
+*.user
+Thumbs.db
+
+# runtime logs and local test output
+*.log
+/vkgame.txt
+/q.txt
+/inst.txt
