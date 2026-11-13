@@ -1,6 +1,6 @@
 # FrameSmooth
 
-**Half-rate rendering with motion reprojection for SteamVR on Windows**, similar in spirit to Oculus ASW
+**Half-rate rendering with motion reprojection for Steam Frame on Windows**, similar in spirit to Oculus ASW
 or SteamVR Motion Smoothing. It is a separate add-on that you can remove completely.
 
 A VR game renders at half the headset's refresh rate (for example 45 fps at 90 Hz). FrameSmooth fills in
