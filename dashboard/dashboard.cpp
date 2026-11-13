@@ -17,6 +17,8 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <d3d11.h>
+#include <dxgi.h>
 #include <openvr.h>
 
 #include <algorithm>
@@ -482,6 +484,69 @@ static void OnClick(fs_shared::Shared* sh, int id, const GameInfo& gi) {
     fs_shared::SaveSettings(st);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Overlay image upload. SetOverlayRaw replaces the overlay image on every call, which makes the panel
+// flicker when it is updated while visible. Instead the panel is drawn into a persistent D3D11 texture
+// that SteamVR keeps showing between updates, and nothing is sent when the image did not change.
+// ---------------------------------------------------------------------------------------------
+struct OverlayUploader {
+    ID3D11Device* dev = nullptr;
+    ID3D11DeviceContext* ctx = nullptr;
+    ID3D11Texture2D* tex = nullptr;
+    uint64_t lastHash = 0;
+    bool haveImage = false;
+
+    void Init(int w, int h) {
+        int32_t adapterIndex = 0;
+        vr::VRSystem()->GetDXGIOutputInfo(&adapterIndex);
+        IDXGIFactory1* f = nullptr;
+        IDXGIAdapter1* ad = nullptr;
+        if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), (void**)&f))) {
+            if (FAILED(f->EnumAdapters1(adapterIndex >= 0 ? UINT(adapterIndex) : 0, &ad))) ad = nullptr;
+            f->Release();
+        }
+        D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
+        HRESULT hr = D3D11CreateDevice(ad, ad ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, &fl, 1,
+                                       D3D11_SDK_VERSION, &dev, nullptr, &ctx);
+        if (ad) ad->Release();
+        if (FAILED(hr)) { dev = nullptr; ctx = nullptr; return; }
+        D3D11_TEXTURE2D_DESC d{};
+        d.Width = UINT(w); d.Height = UINT(h); d.MipLevels = 1; d.ArraySize = 1;
+        d.Format = DXGI_FORMAT_R8G8B8A8_UNORM; d.SampleDesc.Count = 1; d.Usage = D3D11_USAGE_DEFAULT;
+        d.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        if (FAILED(dev->CreateTexture2D(&d, nullptr, &tex))) tex = nullptr;
+    }
+
+    static uint64_t Hash(const uint32_t* px, size_t n) {
+        uint64_t h = 1469598103934665603ull;  // FNV-1a over 32-bit words
+        for (size_t i = 0; i < n; i++) { h ^= px[i]; h *= 1099511628211ull; }
+        return h;
+    }
+
+    // Uploads the RGBA image if it differs from the last one.
+    void Update(vr::VROverlayHandle_t overlay, const uint32_t* rgba, int w, int h, bool force) {
+        uint64_t hsh = Hash(rgba, size_t(w) * size_t(h));
+        if (haveImage && !force && hsh == lastHash) return;
+        lastHash = hsh;
+        haveImage = true;
+        if (tex) {
+            ctx->UpdateSubresource(tex, 0, nullptr, rgba, UINT(w) * 4, 0);
+            ctx->Flush();
+            vr::Texture_t t{tex, vr::TextureType_DirectX, vr::ColorSpace_Gamma};
+            if (vr::VROverlay()->SetOverlayTexture(overlay, &t) == vr::VROverlayError_None) return;
+        }
+        vr::VROverlay()->SetOverlayRaw(overlay, (void*)rgba, uint32_t(w), uint32_t(h), 4);  // fallback
+    }
+
+    void Release() {
+        if (tex) tex->Release();
+        if (ctx) ctx->Release();
+        if (dev) dev->Release();
+        tex = nullptr; ctx = nullptr; dev = nullptr;
+        haveImage = false;
+    }
+};
+
 static bool SteamVRRunning() {
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE) return false;
@@ -519,7 +584,9 @@ static void RunOverlay(fs_shared::Shared* sh) {
     ui.Init(W, H);
     th.Init(64, 64);
     DrawThumb(th);
-    vr::VROverlay()->SetOverlayRaw(thumb, (void*)th.ToRGBA(), 64, 64, 4);
+    vr::VROverlay()->SetOverlayRaw(thumb, (void*)th.ToRGBA(), 64, 64, 4);  // static icon: uploaded once
+    OverlayUploader up;
+    up.Init(W, H);
 
     const DWORD selfPid = GetCurrentProcessId();
     const std::wstring hookDll = HookDllPath();
@@ -530,6 +597,7 @@ static void RunOverlay(fs_shared::Shared* sh) {
     for (;;) {
         if (ExitRequested()) {
             vr::VROverlay()->DestroyOverlay(main);
+            up.Release();
             vr::VR_Shutdown();
             return;
         }
@@ -537,6 +605,7 @@ static void RunOverlay(fs_shared::Shared* sh) {
         while (vr::VRSystem()->PollNextEvent(&ev, sizeof(ev))) {
             if (ev.eventType == vr::VREvent_Quit) {
                 vr::VRSystem()->AcknowledgeQuit_Exiting();
+                up.Release();
                 vr::VR_Shutdown();
                 return;
             }
@@ -569,7 +638,7 @@ static void RunOverlay(fs_shared::Shared* sh) {
         bool visible = vr::VROverlay()->IsOverlayVisible(main);
         if (dirty || (visible && now - lastDraw > 500)) {
             DrawUi(ui, sh, game);
-            vr::VROverlay()->SetOverlayRaw(main, (void*)ui.ToRGBA(), W, H, 4);
+            up.Update(main, ui.ToRGBA(), W, H, false);  // persistent texture; only uploads when the image changed
             lastDraw = now;
             dirty = false;
         }

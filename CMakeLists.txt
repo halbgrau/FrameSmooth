@@ -48,7 +48,7 @@ set_target_properties(fs_submit_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE
 
 add_executable(FrameSmoothDashboard WIN32 dashboard/dashboard.cpp dashboard/dashboard.rc)
 target_include_directories(FrameSmoothDashboard PRIVATE ${openvr_SOURCE_DIR}/headers common)
-target_link_libraries(FrameSmoothDashboard PRIVATE ${openvr_SOURCE_DIR}/lib/win64/openvr_api.lib gdi32 user32 ole32 shell32 uuid)
+target_link_libraries(FrameSmoothDashboard PRIVATE ${openvr_SOURCE_DIR}/lib/win64/openvr_api.lib gdi32 user32 ole32 shell32 uuid d3d11 dxgi)
 target_compile_definitions(FrameSmoothDashboard PRIVATE UNICODE _UNICODE)
 add_custom_command(TARGET FrameSmoothDashboard POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different ${openvr_SOURCE_DIR}/bin/win64/openvr_api.dll $<TARGET_FILE_DIR:FrameSmoothDashboard>
