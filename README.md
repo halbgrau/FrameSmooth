@@ -1,4 +1,4 @@
-# FrameSmooth
+# FrameSmooth - ASW / Motion Smoothing for Steam Frame
 
 **Disclaimer: This is heavily vibecoded so use on your own risk.** If it works for you and you like my projects feel free to buy me a beer :) https://ko-fi.com/halbgrau
 
