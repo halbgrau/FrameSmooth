@@ -25,8 +25,8 @@ contain anything headset-specific.
 - **Reprojection:** *Motion* (ASW-like, GPU motion estimation) or *Rotation only*.
 - **SteamVR dashboard tab** for all settings and live status (game fps, synthesized frames per second, API).
 - **Tint fake frames** option: synthesized frames are tinted green, so you can see them.
-- **Exit button**, Start/Exit shortcuts, a `--toggle` option for a Steam library shortcut, and an optional
-  *Start with SteamVR*.
+- **Start FrameSmooth** shortcut on the Desktop and in the Start Menu, an **Exit** button in the dashboard
+  tab, a `--toggle` option for a Steam library shortcut, and an optional *Start with SteamVR*.
 
 ## Supported games
 
@@ -58,6 +58,10 @@ Requirements: Windows 10/11 (64-bit), SteamVR, and a GPU with Direct3D 11.4 supp
 2. Double-click **`Install.cmd`**. No admin rights are needed.
 3. Start SteamVR and open the dashboard. A **FrameSmooth** tab appears.
 
+Afterwards, start FrameSmooth any time with the **Start FrameSmooth** shortcut on your Desktop or in the
+Start Menu. A short message confirms that it is running. FrameSmooth has no window of its own: everything
+happens in its tab in the SteamVR dashboard.
+
 Windows SmartScreen or your antivirus may warn about the download. The files are not code-signed, and the
 OpenVR hook uses DLL injection, which heuristic scanners flag. You can build the files yourself from this
 source code instead (see below).
@@ -70,7 +74,7 @@ All of it is removed by `Uninstall.cmd` (also found in the install folder):
 - `%LOCALAPPDATA%\FrameSmooth\` (settings and logs)
 - One registry value under `HKCU\SOFTWARE\Khronos\OpenXR\1\ApiLayers\Implicit` (the OpenXR layer
   registration; set to *disabled* whenever FrameSmooth is not running)
-- Start Menu shortcuts *FrameSmooth* and *Exit FrameSmooth*, plus an optional Startup shortcut
+- A *Start FrameSmooth* shortcut on the Desktop and in the Start Menu, plus an optional Startup shortcut
   (*Start with SteamVR*)
 
 ## Usage
@@ -78,8 +82,10 @@ All of it is removed by `Uninstall.cmd` (also found in the install folder):
 - **OpenXR games:** just start the game while FrameSmooth is running.
 - **OpenVR games:** start the game, open the FrameSmooth tab and press **Enable for this game**. This is
   remembered; from then on FrameSmooth attaches about 10 seconds after the game starts in VR.
-- **Exit:** use the **Exit** button in the tab, the *Exit FrameSmooth* shortcut, or run
-  `FrameSmoothDashboard.exe --exit`.
+- **Start:** use the *Start FrameSmooth* shortcut (Desktop or Start Menu), or turn on *Start with SteamVR* in
+  the tab.
+- **Exit:** use the **Exit** button in the FrameSmooth tab. For scripts, `FrameSmoothDashboard.exe --exit`
+  does the same.
 - **Steam library shortcut:** *Games → Add a Non-Steam Game*, select
   `%LOCALAPPDATA%\Programs\FrameSmooth\FrameSmoothDashboard.exe` and set its launch options to
   `--toggle`. Each press of *Play* then starts FrameSmooth or closes it.

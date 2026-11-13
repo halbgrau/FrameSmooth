@@ -70,20 +70,27 @@ $k.Close()
 
 $shell = New-Object -ComObject WScript.Shell
 $programs = [Environment]::GetFolderPath('Programs')
-$lnk = $shell.CreateShortcut((Join-Path $programs 'FrameSmooth.lnk'))
-$lnk.TargetPath = Join-Path $dst 'FrameSmoothDashboard.exe'
-$lnk.WorkingDirectory = $dst
-$lnk.Save()
-$lnk = $shell.CreateShortcut((Join-Path $programs 'Exit FrameSmooth.lnk'))
-$lnk.TargetPath = Join-Path $dst 'FrameSmoothDashboard.exe'
-$lnk.Arguments = '--exit'
-$lnk.WorkingDirectory = $dst
-$lnk.Save()
+$desktop = [Environment]::GetFolderPath('Desktop')
+$exe = Join-Path $dst 'FrameSmoothDashboard.exe'
+
+# Shortcuts from earlier versions
+foreach ($old in 'FrameSmooth.lnk', 'Exit FrameSmooth.lnk') { Remove-Item (Join-Path $programs $old) -ErrorAction SilentlyContinue }
+
+# One "Start FrameSmooth" shortcut in the Start Menu and on the Desktop (exiting is done in the dashboard tab)
+foreach ($dir in $programs, $desktop) {
+    $lnk = $shell.CreateShortcut((Join-Path $dir 'Start FrameSmooth.lnk'))
+    $lnk.TargetPath = $exe
+    $lnk.WorkingDirectory = $dst
+    $lnk.IconLocation = "$exe,0"
+    $lnk.Description = 'Start FrameSmooth (it appears as a tab in the SteamVR dashboard)'
+    $lnk.Save()
+}
 
 if ($Autostart) {
     $startup = [Environment]::GetFolderPath('Startup')
     $lnk = $shell.CreateShortcut((Join-Path $startup 'FrameSmooth.lnk'))
-    $lnk.TargetPath = Join-Path $dst 'FrameSmoothDashboard.exe'
+    $lnk.TargetPath = $exe
+    $lnk.Arguments = '--autostart'
     $lnk.WorkingDirectory = $dst
     $lnk.Save()
 }

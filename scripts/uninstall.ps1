@@ -35,8 +35,10 @@ if ($k) {
     }
 }
 
-Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) 'FrameSmooth.lnk') -ErrorAction SilentlyContinue
-Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) 'Exit FrameSmooth.lnk') -ErrorAction SilentlyContinue
+foreach ($n in 'Start FrameSmooth.lnk', 'FrameSmooth.lnk', 'Exit FrameSmooth.lnk') {  # current + earlier versions
+    Remove-Item (Join-Path ([Environment]::GetFolderPath('Programs')) $n) -ErrorAction SilentlyContinue
+}
+Remove-Item (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Start FrameSmooth.lnk') -ErrorAction SilentlyContinue
 Remove-Item (Join-Path ([Environment]::GetFolderPath('Startup')) 'FrameSmooth.lnk') -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $env:LOCALAPPDATA 'FrameSmooth') -Recurse -Force -ErrorAction SilentlyContinue
 Remove-Item (Join-Path $env:LOCALAPPDATA 'Programs\FrameSmooth') -Recurse -Force -ErrorAction SilentlyContinue

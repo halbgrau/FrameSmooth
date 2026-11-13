@@ -69,6 +69,7 @@ static void SetAutostart(bool on) {
     IShellLinkW* sl = nullptr;
     if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&sl)))) {
         sl->SetPath(exe);
+        sl->SetArguments(L"--autostart");  // starts silently (no "FrameSmooth is running" message)
         sl->SetWorkingDirectory(dir.c_str());
         sl->SetDescription(L"FrameSmooth (waits for SteamVR)");
         IPersistFile* pf = nullptr;
@@ -576,16 +577,37 @@ static void RunOverlay(fs_shared::Shared* sh) {
     }
 }
 
-// Usage: FrameSmoothDashboard.exe            start (no-op if already running)
-//        FrameSmoothDashboard.exe --exit     close a running instance
-//        FrameSmoothDashboard.exe --toggle   close it if running, otherwise start it
+// Short message that closes itself after a few seconds (FrameSmooth has no window of its own).
+static void ShowInfo(const wchar_t* text, DWORD ms) {
+    typedef int(WINAPI * PFN_MsgTimeout)(HWND, LPCWSTR, LPCWSTR, UINT, WORD, DWORD);
+    auto fn = (PFN_MsgTimeout)GetProcAddress(GetModuleHandleW(L"user32.dll"), "MessageBoxTimeoutW");
+    UINT flags = MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST;
+    if (fn) fn(nullptr, text, L"FrameSmooth", flags, 0, ms);
+}
+
+static const wchar_t* kRunningText =
+    L"FrameSmooth is running.\n\n"
+    L"Open the SteamVR dashboard and select the \"FrameSmooth\" tab to change settings.\n"
+    L"Use the Exit button in that tab to close FrameSmooth.";
+
+// Usage: FrameSmoothDashboard.exe              start (shows a short confirmation)
+//        FrameSmoothDashboard.exe --autostart  start silently (used by "Start with SteamVR")
+//        FrameSmoothDashboard.exe --exit       close a running instance
+//        FrameSmoothDashboard.exe --toggle     close it if running, otherwise start it
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR cmd, int) {
     const bool argExit = cmd && wcsstr(cmd, L"--exit");
     const bool argToggle = cmd && wcsstr(cmd, L"--toggle");
+    const bool argAuto = cmd && wcsstr(cmd, L"--autostart");
     g_exitEvt = CreateEventW(nullptr, TRUE, FALSE, L"Local\\FrameSmoothDashboardExit");
     HANDLE mtx = CreateMutexW(nullptr, TRUE, L"Local\\FrameSmoothDashboard");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        if (argExit || argToggle) SetEvent(g_exitEvt);  // ask the running instance to close
+        if (argExit || argToggle) {
+            SetEvent(g_exitEvt);  // ask the running instance to close
+            if (argToggle) ShowInfo(L"FrameSmooth has been closed.", 3000);
+        } else if (!argAuto) {
+            ShowInfo(L"FrameSmooth is already running.\n\n"
+                     L"Open the SteamVR dashboard and select the \"FrameSmooth\" tab.", 5000);
+        }
         return 0;
     }
     if (argExit) return 0;  // nothing running
@@ -608,6 +630,8 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR cmd, int) {
     fs_shared::Shared* sh = fs_shared::Open();
     if (!sh) return 1;
     sh->settings = fs_shared::LoadSettings();
+    if (AutostartEnabled()) SetAutostart(true);  // refresh shortcuts from older versions (adds --autostart)
+    if (!argAuto) std::thread([] { ShowInfo(kRunningText, 6000); }).detach();
     std::thread watcher(WatchThread);
     while (!ExitRequested()) {
         if (SteamVRRunning()) {
