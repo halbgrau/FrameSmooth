@@ -1,5 +1,7 @@
 # FrameSmooth
 
+**Disclaimer: This is heavily vibecoded so use on your own risk**
+
 **Half-rate rendering with motion reprojection for Steam Frame on Windows**, similar in spirit to Oculus ASW
 or SteamVR Motion Smoothing. It is a separate add-on that you can remove completely.
 
