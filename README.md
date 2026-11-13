@@ -36,7 +36,7 @@ contain anything headset-specific.
 | OpenVR | Direct3D 11, Direct3D 12, Vulkan | per-game opt-in in the dashboard tab |
 | any | OpenGL | not supported (the game runs normally) |
 
-Tested so far: *EXD* (OpenXR, D3D11) and *No Man's Sky* (OpenVR, Vulkan).
+Tested so far: *Titanfall*, *EXD* (OpenXR, D3D11) and *No Man's Sky* (OpenVR, Vulkan).
 Reports for other games are welcome. Please open an issue and attach the logs mentioned below.
 
 ## Safety
