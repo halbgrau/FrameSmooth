@@ -47,6 +47,10 @@ Reports for other games are welcome. Please open an issue and attach the logs me
 - **Anti-cheat games are left alone.** FrameSmooth detects EasyAntiCheat, BattlEye and similar next to a
   game. It never loads into such games, and it disables its OpenXR layer while one of them is running.
   Loading code into a game with anti-cheat could get you kicked or banned.
+  - **Override (at your own risk):** if you are sure, for example for an offline or single-player game, the
+    *This game* row offers **Ignore anti-cheat**. It needs a second tap within 5 seconds to confirm, and
+    it applies only to that game's folder. FrameSmooth does **not** hide from anti-cheat; it only stops
+    refusing to run. **Respect anti-cheat** undoes it. OpenXR games need a restart after the change.
 - **Freeze protection.** If FrameSmooth stops receiving frames for 2 seconds, or a game waits more than
   1 second for it, rendering is handed back to the game.
 

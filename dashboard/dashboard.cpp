@@ -37,8 +37,10 @@ static const int W = 1024, H = 850;
 
 enum ButtonId {
     B_EN_ON = 1, B_EN_OFF, B_RATE_AUTO, B_RATE_HALF, B_RATE_NATIVE, B_SYN_MOTION, B_SYN_ROT, B_DBG_ON, B_DBG_OFF,
-    B_GAME_ON, B_GAME_OFF, B_AUTO_ON, B_AUTO_OFF, B_EXIT
+    B_GAME_ON, B_GAME_OFF, B_AUTO_ON, B_AUTO_OFF, B_EXIT, B_AC_IGNORE, B_AC_RESPECT
 };
+
+static ULONGLONG g_acConfirmUntil = 0;  // "Ignore anti-cheat" needs a second tap before this time
 
 static HANDLE g_exitEvt = nullptr;  // signaled by the Exit button or "FrameSmoothDashboard.exe --exit/--toggle"
 static bool ExitRequested() { return WaitForSingleObject(g_exitEvt, 0) == WAIT_OBJECT_0; }
@@ -95,6 +97,8 @@ struct GameInfo {
     bool d3d12 = false, vulkan = false;
     bool antiCheat = false;
     std::wstring antiCheatWhat;
+    std::wstring root;        // game root folder (key of the "ignore anti-cheat" override)
+    bool acIgnored = false;   // user chose to ignore the anti-cheat detection for this game
     bool hookLoaded = false;
     bool is32bit = false;
     ULONGLONG lastScan = 0;
@@ -133,6 +137,9 @@ static void ScanAntiCheat(GameInfo& gi) {
     if (fs_shared::HasAntiCheat(gi.path, &gi.antiCheatWhat)) gi.antiCheat = true;
 }
 
+// Anti-cheat keeps FrameSmooth away from this game unless the user explicitly chose to ignore it.
+static bool AntiCheatBlocks(const GameInfo& gi) { return gi.antiCheat && !gi.acIgnored; }
+
 // ---------------------------------------------------------------------------------------------
 // Layer registration watcher: the OpenXR layer is registered only while this app runs and no
 // program from an anti-cheat-protected folder is running (so it is never loaded into such games).
@@ -168,7 +175,10 @@ static void WatchThread() {
     std::wstring winDir(MAX_PATH, L'\0');
     winDir.resize(GetWindowsDirectoryW(&winDir[0], MAX_PATH));
     winDir = Lower(winDir);
-    std::map<DWORD, std::wstring> acProcs;  // pid -> exe name, for running anti-cheat processes
+    struct AcProc {
+        std::wstring name, root;
+    };
+    std::map<DWORD, AcProc> acProcs;  // running anti-cheat processes
     std::set<DWORD> seen;
     std::map<std::wstring, bool> dirCache;
     int state = -1;
@@ -196,7 +206,7 @@ static void WatchThread() {
                 auto it = dirCache.find(dir);
                 bool ac = it != dirCache.end() ? it->second : (dirCache[dir] = fs_shared::HasAntiCheat(path));
                 if (ac) {
-                    acProcs[pid] = pe.szExeFile;
+                    acProcs[pid] = AcProc{pe.szExeFile, fs_shared::GameRootOf(path)};
                     WatchLog(L"anti-cheat program: %s (pid %lu)", path.c_str(), pid);
                 }
             }
@@ -204,11 +214,27 @@ static void WatchThread() {
         }
         for (auto it = seen.begin(); it != seen.end();) it = alive.count(*it) ? std::next(it) : seen.erase(it);
         for (auto it = acProcs.begin(); it != acProcs.end();) it = alive.count(it->first) ? std::next(it) : acProcs.erase(it);
+        // User overrides: programs from a game folder marked "ignore anti-cheat" do not count, and while such a
+        // game runs, the anti-cheat services next to it (e.g. EasyAntiCheat_EOS.exe) do not count either.
+        bool ignoredGameRunning = false;
+        for (auto& kv : acProcs)
+            if (fs_shared::IsAntiCheatIgnored(kv.second.root)) ignoredGameRunning = true;
+        std::wstring blocking;
+        for (auto& kv : acProcs) {
+            const AcProc& p = kv.second;
+            bool ignored = fs_shared::IsAntiCheatIgnored(p.root) || (ignoredGameRunning && fs_shared::IsAntiCheatServiceName(p.name));
+            if (!ignored && blocking.empty()) blocking = p.name;
+        }
         {
             std::lock_guard<std::mutex> lk(g_acMtx);
-            g_acName = acProcs.empty() ? L"" : acProcs.begin()->second;
+            g_acName = blocking;
         }
-        int want = acProcs.empty() ? 1 : 0;
+        int want = blocking.empty() ? 1 : 0;
+        static bool loggedOverride = false;
+        if (ignoredGameRunning != loggedOverride) {
+            loggedOverride = ignoredGameRunning;
+            WatchLog(ignoredGameRunning ? L"anti-cheat ignored by user for a running game" : L"no user-ignored anti-cheat game running");
+        }
         if (want != state) {
             LONG r = fs_shared::SetLayerRegistered(manifest, want == 1);
             WatchLog(L"OpenXR layer %s (result %ld)", want == 1 ? L"ON" : L"OFF (anti-cheat program running)", r);
@@ -236,12 +262,14 @@ static GameInfo DetectGame(DWORD pid, const GameInfo& prev) {
         gi.is32bit = wow != FALSE;
         CloseHandle(h);
         gi.exeLower = Lower(gi.path.substr(gi.path.find_last_of(L"\\/") + 1));
+        gi.root = fs_shared::GameRootOf(gi.path);
         ScanAntiCheat(gi);
     }
     if (GetTickCount64() - gi.lastScan > 3000) {
         gi.lastScan = GetTickCount64();
         ScanModules(gi);
     }
+    gi.acIgnored = gi.antiCheat && fs_shared::IsAntiCheatIgnored(gi.root);
     return gi;
 }
 
@@ -317,10 +345,19 @@ struct Canvas {
         SetTextColor(dc, c);
         TextOutW(dc, x, y, t.c_str(), int(t.size()));
     }
-    void Button(int x, int y, int ww, int hh, const wchar_t* label, bool selected, int id) {
-        Fill(x, y, ww, hh, selected ? RGB(38, 132, 255) : RGB(60, 64, 74), 22);
+    // color: 0 = default (blue when selected, grey otherwise)
+    void Button(int x, int y, int ww, int hh, const wchar_t* label, bool selected, int id, COLORREF color = 0) {
+        Fill(x, y, ww, hh, color ? color : (selected ? RGB(38, 132, 255) : RGB(60, 64, 74)), 22);
         SelectObject(dc, fBody);
         SetTextColor(dc, RGB(255, 255, 255));
+        RECT r{x, y, x + ww, y + hh};
+        DrawTextW(dc, label, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        buttons.push_back({r, id});
+    }
+    void SmallButton(int x, int y, int ww, int hh, const wchar_t* label, int id) {
+        Fill(x, y, ww, hh, RGB(60, 64, 74), 16);
+        SelectObject(dc, fSmall);
+        SetTextColor(dc, RGB(230, 232, 238));
         RECT r{x, y, x + ww, y + hh};
         DrawTextW(dc, label, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         buttons.push_back({r, id});
@@ -397,13 +434,28 @@ static void DrawUi(Canvas& c, fs_shared::Shared* sh, const GameInfo& gi) {
         const wchar_t* api = gi.api == GameApi::OpenXR ? L"OpenXR" : gi.api == GameApi::OpenVR ? L"OpenVR" : L"?";
         swprintf_s(line, L"%s  (%s)", gi.exeLower.c_str(), api);
         c.Text(bx, y - 4, line, c.fSmall, RGB(200, 204, 214));
-        if (gi.api == GameApi::OpenXR) {
-            c.Text(bx, y + 30, L"OpenXR games are handled automatically.", c.fSmall, RGB(110, 220, 140));
+        if (AntiCheatBlocks(gi) && gi.api != GameApi::Unknown) {
+            // Anti-cheat found: FrameSmooth stays away unless the user explicitly overrides it (tap twice).
+            bool confirming = GetTickCount64() < g_acConfirmUntil;
+            swprintf_s(line, L"Anti-cheat detected (%s)", gi.antiCheatWhat.c_str());
+            c.Text(bx, y + 40, line, c.fSmall, RGB(240, 120, 100));
+            c.Button(bx + 330, y + 28, 300, 52, confirming ? L"Tap again to confirm" : L"Ignore anti-cheat", false,
+                     B_AC_IGNORE, confirming ? RGB(170, 50, 50) : 0);
+            c.Text(bx, y + 88, L"Ignoring it can get you kicked or banned. Offline/single-player only.", c.fSmall,
+                   RGB(240, 180, 90));
+        } else if (gi.api == GameApi::OpenXR) {
+            if (gi.acIgnored) {
+                c.Text(bx, y + 30, L"Anti-cheat ignored. Restart the game if it was already running.", c.fSmall, RGB(240, 180, 90));
+                c.SmallButton(bx, y + 70, 260, 40, L"Respect anti-cheat", B_AC_RESPECT);
+            } else {
+                c.Text(bx, y + 30, L"OpenXR games are handled automatically.", c.fSmall, RGB(110, 220, 140));
+            }
         } else if (gi.api == GameApi::OpenVR) {
-            if (gi.antiCheat) {
-                swprintf_s(line, L"Anti-cheat detected (%s) - not supported", gi.antiCheatWhat.c_str());
-                c.Text(bx, y + 30, line, c.fSmall, RGB(240, 120, 100));
-            } else if (gi.is32bit) {
+            if (gi.acIgnored) {
+                c.Text(bx + 276, y + 82, L"Anti-cheat ignored - at your own risk", c.fSmall, RGB(240, 180, 90));
+                c.SmallButton(bx, y + 84, 260, 34, L"Respect anti-cheat", B_AC_RESPECT);
+            }
+            if (gi.is32bit) {
                 c.Text(bx, y + 30, L"32-bit game - not supported", c.fSmall, RGB(240, 180, 90));
             } else {
                 bool on = fs_shared::IsGameEnabled(std::string(gi.exeLower.begin(), gi.exeLower.end()));
@@ -470,7 +522,23 @@ static void OnClick(fs_shared::Shared* sh, int id, const GameInfo& gi) {
         case B_DBG_ON: st.debugTint = 1; break;
         case B_DBG_OFF: st.debugTint = 0; break;
         case B_GAME_ON:
-            if (gi.pid && !gi.antiCheat) fs_shared::SetGameEnabled(gi.exeLower, true);
+            if (gi.pid && !AntiCheatBlocks(gi)) fs_shared::SetGameEnabled(gi.exeLower, true);
+            return;
+        case B_AC_IGNORE:  // two-step: first tap arms, second tap within 5 s confirms
+            if (!gi.pid || !gi.antiCheat) return;
+            if (GetTickCount64() < g_acConfirmUntil) {
+                fs_shared::SetAntiCheatIgnored(gi.root, true);
+                g_acConfirmUntil = 0;
+            } else {
+                g_acConfirmUntil = GetTickCount64() + 5000;
+            }
+            return;
+        case B_AC_RESPECT:
+            if (gi.pid) {
+                fs_shared::SetAntiCheatIgnored(gi.root, false);
+                fs_shared::SetGameEnabled(gi.exeLower, false);
+            }
+            g_acConfirmUntil = 0;
             return;
         case B_GAME_OFF:
             if (gi.pid) fs_shared::SetGameEnabled(gi.exeLower, false);
@@ -629,7 +697,7 @@ static void RunOverlay(fs_shared::Shared* sh) {
             game = DetectGame(pid, game);
             // opt-in injection of the OpenVR hook
             // wait until the game has been running in VR for a while (attaching during its start-up is unreliable)
-            if (game.pid && game.api == GameApi::OpenVR && !game.antiCheat && !game.is32bit && !game.hookLoaded &&
+            if (game.pid && game.api == GameApi::OpenVR && !AntiCheatBlocks(game) && !game.is32bit && !game.hookLoaded &&
                 !injected.count(game.pid) && GetTickCount64() - game.sceneSince >= 10000 &&
                 fs_shared::IsGameEnabled(std::string(game.exeLower.begin(), game.exeLower.end()))) {
                 injected.insert(game.pid);

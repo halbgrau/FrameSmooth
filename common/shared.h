@@ -86,6 +86,53 @@ inline void SetGameEnabled(const std::wstring& exeLower, bool on) {
     WritePrivateProfileStringW(L"Games", exeLower.c_str(), on ? L"1" : nullptr, SettingsPath().c_str());
 }
 
+// ---------------------------------------------------------------------------------------------
+// User override: "ignore anti-cheat" for one game. Keyed by the game's root folder, so the game's
+// launcher, the game itself and its helpers in that folder are all covered. Only set when the user
+// explicitly confirms it in the dashboard (at their own risk).
+// ---------------------------------------------------------------------------------------------
+
+// Root folder of a game: the folder directly below ...\steamapps\common\ if the exe lives there,
+// otherwise the exe's own folder. Returned lower-case.
+inline std::wstring GameRootOf(const std::wstring& exePath) {
+    std::wstring low = exePath;
+    for (auto& c : low) c = towlower(c);
+    if (low.compare(0, 4, L"\\\\?\\") == 0) low = low.substr(4);
+    const std::wstring marker = L"\\steamapps\\common\\";
+    size_t m = low.find(marker);
+    if (m != std::wstring::npos) {
+        size_t end = low.find(L'\\', m + marker.size());
+        if (end != std::wstring::npos) return low.substr(0, end);
+    }
+    size_t cut = low.find_last_of(L"\\/");
+    return cut == std::wstring::npos ? low : low.substr(0, cut);
+}
+
+inline std::wstring AntiCheatKey(const std::wstring& root) {
+    std::wstring k = root;
+    for (auto& c : k)
+        if (c == L'\\' || c == L':' || c == L'=' || c == L'[' || c == L']') c = L'/';
+    return k;
+}
+
+inline bool IsAntiCheatIgnored(const std::wstring& root) {
+    if (root.empty()) return false;
+    return GetPrivateProfileIntW(L"IgnoreAntiCheat", AntiCheatKey(root).c_str(), 0, SettingsPath().c_str()) != 0;
+}
+
+inline void SetAntiCheatIgnored(const std::wstring& root, bool on) {
+    if (root.empty()) return;
+    WritePrivateProfileStringW(L"IgnoreAntiCheat", AntiCheatKey(root).c_str(), on ? L"1" : nullptr, SettingsPath().c_str());
+}
+
+// Anti-cheat service/launcher processes (they live outside the game folder, e.g. EasyAntiCheat_EOS.exe).
+inline bool IsAntiCheatServiceName(std::wstring exeName) {
+    for (auto& c : exeName) c = towlower(c);
+    for (const wchar_t* s : {L"easyanticheat", L"beservice", L"battleye", L"start_protected_game", L"eaanticheat"})
+        if (exeName.find(s) != std::wstring::npos) return true;
+    return false;
+}
+
 // FrameSmooth only acts on games while the FrameSmooth app (dashboard) is running.
 inline bool DashboardRunning() {
     HANDLE h = OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\FrameSmoothDashboard");
